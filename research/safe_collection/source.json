@@ -1,0 +1,8 @@
+{
+  "source": "https://github.com/acidlabsdev/gtav-enhanced-scripts",
+  "commit": "30dd0df8bce87bdc21103555bae380be9fc0a916",
+  "commit_message": "chore: update for 1.73 b1158.13",
+  "source_build": "1158.13",
+  "installed_build": "1158.16",
+  "sha256": "1a38e139918d118623e671cf5dddb6e1fd994ad230aee130b1070e389fe2d64a"
+}

@@ -1,0 +1,16 @@
+# Local backups, diagnostics and runtime data
+backups/
+publish/
+*.bak
+*.disabled
+*.log
+*.png
+*.jpg
+*.jpeg
+*.mp4
+.env
+.env.*
+!.env.example
+node_modules/
+.DS_Store
+Thumbs.db
