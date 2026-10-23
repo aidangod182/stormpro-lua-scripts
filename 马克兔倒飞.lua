@@ -1,10 +1,10 @@
--- 马克兔倒飞 v3.1 · 平衡辅助版 / StormPro
+-- 马克兔倒飞 v3.2 · 离地判定修复 / StormPro
 -- 原生驾驶 + 倒飞横滚纠偏；每次纠偏保留当前机头方向。
 -- 不修改 handling、速度、角速度、碰撞、输入或镜头。
 -- GET_ENTITY_QUATERNION 使用显式出参，避免依赖包装器的多返回值行为。
 local MK2 = 2069146067
 local GET_QUAT = 0x7B3703D2D32DFA18
-local C = {min_height=5.0, balance=true, strength=10.0, bank=35.0}
+local C = {min_height=5.0, balance=true, strength=10.0, bank=35.0, manual_height=false}
 local R = {request=nil, pending=nil, active=nil, buffer=nil, busy=false, stopped=false,
     status="就绪：驾驶 Mk2，在空中点击进入倒飞。", error=""}
 
@@ -105,9 +105,11 @@ local function balance_tick(now)
     end
     if not can_control(p.veh) then stop_balance("平衡辅助已停止：失去载具控制权"); return end
     local height=need(ENTITY,"GET_ENTITY_HEIGHT_ABOVE_GROUND",p.veh)
-    assert(finite(height),"无法读取离地高度")
-    if need(ENTITY,"IS_ENTITY_IN_AIR",p.veh)~=true or height<1.5 then
-        stop_balance("平衡辅助已停止：接近地面或已经着地"); return
+    if not p.ignore_height then
+        assert(finite(height),"无法读取离地高度")
+        if height<1.5 then
+            stop_balance(string.format("平衡辅助已停止：离地读数 %.2f 米",height)); return
+        end
     end
     local elapsed=p.balance_time and now-p.balance_time or 0
     p.balance_time=now
@@ -180,6 +182,8 @@ local function tick()
         if not current then report(why); return end
         current.mode=mode; current.start=now; current.last=now; current.next=now
         current.min_height=C.min_height
+        -- 兼容开关仅对主动点击的翻转生效；自动起飞准备始终检查高度。
+        current.ignore_height=C.manual_height and mode~="armed"
         R.pending=current
     end
     local p=R.pending
@@ -196,12 +200,15 @@ local function tick()
     if not current then finish("等待已取消："..why); return end
     if not same(p,current) then finish("等待已取消：角色或载具已改变"); return end
     local height=need(ENTITY,"GET_ENTITY_HEIGHT_ABOVE_GROUND",p.veh)
-    assert(finite(height),"无法读取离地高度")
-    if need(ENTITY,"IS_ENTITY_IN_AIR",p.veh)~=true or height<p.min_height then
+    if not p.ignore_height and not finite(height) then
+        finish("未读到有效离地高度；确认在空中后可启用手动高度兼容"); return
+    end
+    -- Mk2 悬浮时不能用 IS_ENTITY_IN_AIR 的布尔值否决有效高度。
+    if not p.ignore_height and height<p.min_height then
         if p.mode=="armed" then
-            R.status=string.format("已准备：请在 20 秒内起飞至 %.0f 米以上，只执行一次",p.min_height)
+            R.status=string.format("等待起飞：离地读数 %.2f 米，要求 %.0f 米（20 秒内）",height,p.min_height)
         else
-            finish(string.format("请先飞到离地 %.0f 米以上",p.min_height))
+            finish(string.format("离地读数 %.2f 米，要求 %.0f 米；读数异常可启用手动高度兼容",height,p.min_height))
         end
         return
     end
@@ -240,7 +247,7 @@ local function request(mode)
     R.status="请求已提交"
 end
 function on_menu_render()
-    StormPro.TextColored("马克兔倒飞 v3.1 · 平衡辅助版",0.28,0.76,1.0,1.0)
+    StormPro.TextColored("马克兔倒飞 v3.2 · 离地判定修复",0.28,0.76,1.0,1.0)
     StormPro.Text("自动维持倒飞左右平衡，按原有键位驾驶。")
     StormPro.TextDisabled("油门、升降俯仰与飞行方向仍由你控制。")
     local enabled,changed=StormPro.Checkbox("进入倒飞后自动保持平衡",C.balance)
@@ -264,6 +271,11 @@ function on_menu_render()
     if finite(bank) then C.bank=clamp(bank,0.0,60.0) end
     local height=StormPro.SliderFloat("最低离地高度（米）",C.min_height,3.0,20.0)
     if finite(height) then C.min_height=math.max(3.0,math.min(20.0,height)) end
+    local compat,compat_changed=StormPro.Checkbox("手动高度兼容（确认在空中时使用）",C.manual_height)
+    if compat_changed and type(compat)=="boolean" then C.manual_height=compat end
+    if C.manual_height then
+        StormPro.TextDisabled("仅手动进入/翻正跳过高度检查；落地前请停止平衡辅助。")
+    end
     StormPro.Separator()
     StormPro.Text("状态："..R.status)
     StormPro.TextDisabled("起飞准备有效期 20 秒；下车、换车或暂停会取消。")

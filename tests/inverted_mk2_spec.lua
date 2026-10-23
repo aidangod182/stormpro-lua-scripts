@@ -4,7 +4,7 @@ local function harness(balance)
         paused=false,faded=false,dead={},ptrs={[10]=1010,[20]=2020,[21]=2021},
         net=true,control=true,q={0.0,0.0,0.0,1.0},mem={},calls=0,writes=0,
         allocs=0,frees=0,logs={},texts={},buffer=nil,vel={2,40,-3},ang={0.1,0.2,0.3},
-        steer=0.0,roll_input=0.0,sliders={}}
+        steer=0.0,roll_input=0.0,sliders={},checks={}}
     local env=setmetatable({}, {__index=_G})
     local function wrap(fn) return function(...) w.calls=w.calls+1; return fn(...) end end
     local function strict(t)
@@ -16,7 +16,11 @@ local function harness(balance)
         Text=function(s) w.texts[#w.texts+1]=s end,
         TextDisabled=function() end,TextColored=function() end,Separator=function() end,
         SliderFloat=function(label,v) return w.sliders[label] or v end,
-        Checkbox=function(_,v) if w.check~=nil then return w.check,w.check~=v end; return v,false end,
+        Checkbox=function(label,v)
+            local val=w.checks[label]
+            if val~=nil then return val,val~=v end
+            if w.check~=nil then return w.check,w.check~=v end; return v,false
+        end,
         Button=function(label) return label==w.click end,
     })
     env.Entity=strict({HandleToPtr=wrap(function(h) return w.ptrs[h] or 0 end)})
@@ -125,31 +129,31 @@ test("重复进入不会翻回去，退出可还原朝向",function()
     click(EXIT); step(); assert(w.writes==2)
 end)
 test("地面准备只对这次起飞执行一次",function()
-    local w,e,click,step=harness(); w.air=false; w.height=0
+    local w,e,click,step=harness(); w.air=false; w.height=0; w.height=0
     click(ARM); step(); assert(w.writes==0)
-    w.air=true; w.height=4; step(100); assert(w.writes==0)
+    w.air=true; w.height=10; w.height=4; step(100); assert(w.writes==0)
     w.height=6; step(100); assert(w.writes==1)
-    w.air=false; step(100); w.air=true; step(100); assert(w.writes==1)
+    w.air=false; w.height=0; step(100); w.air=true; w.height=10; step(100); assert(w.writes==1)
 end)
 test("取消等待与卸载不写姿态",function()
     for _,stop in ipairs({false,true}) do
-        local w,e,click,step=harness(); w.air=false
+        local w,e,click,step=harness(); w.air=false; w.height=0
         click(ARM); step()
         if stop then e.on_stop() else click("取消等待") end
-        w.air=true; step(100); assert(w.writes==0 and w.allocs==0)
+        w.air=true; w.height=10; step(100); assert(w.writes==0 and w.allocs==0)
     end
 end)
 test("等待 20 秒超时",function()
-    local w,e,click,step,msg=harness(); w.air=false
+    local w,e,click,step,msg=harness(); w.air=false; w.height=0
     click(ARM); step()
     for _=1,200 do step(100) end
-    w.air=true; step(100)
+    w.air=true; w.height=10; step(100)
     assert(w.writes==0 and msg():find("超时"))
 end)
 test("计时中断和回绕取消，不延迟触发",function()
     for _,delta in ipairs({2000,-100}) do
-        local w,e,click,step,msg=harness(); w.air=false
-        click(ARM); step(); w.air=true; step(delta)
+        local w,e,click,step,msg=harness(); w.air=false; w.height=0
+        click(ARM); step(); w.air=true; w.height=10; step(delta)
         assert(w.writes==0 and msg():find("中断"))
     end
 end)
@@ -165,15 +169,15 @@ test("换车、句柄复用、下车、死亡、暂停、场景切换取消准�
         function(w) w.faded=true end,
     }
     for _,change in ipairs(changes) do
-        local w,e,click,step=harness(); w.air=false
-        click(ARM); step(); change(w); w.air=true; step(100)
+        local w,e,click,step=harness(); w.air=false; w.height=0
+        click(ARM); step(); change(w); w.air=true; w.height=10; step(100)
         assert(w.writes==0 and w.allocs==0)
     end
 end)
 test("错误车型、乘客、地面、低空、无控制权拒绝写入",function()
     local changes={
         function(w) w.model=1 end,function(w) w.driver=11 end,
-        function(w) w.air=false end,function(w) w.height=2 end,
+        function(w) w.air=false; w.height=0 end,function(w) w.height=2 end,
         function(w) w.control=false end,function(w) w.dead[10]=true end,
     }
     for _,change in ipairs(changes) do
@@ -214,8 +218,8 @@ test("分配失败不调用姿态写入",function()
     click(ENTER); step(); assert(w.writes==0 and w.frees==0 and msg():find("操作失败"))
 end)
 test("准备期间的新请求覆盖旧请求",function()
-    local w,e,click,step=harness(); w.air=false
-    click(ARM); step(); click(EXIT); w.air=true; step()
+    local w,e,click,step=harness(); w.air=false; w.height=0
+    click(ARM); step(); click(EXIT); w.air=true; w.height=10; step()
     assert(w.writes==0); step(100); assert(w.writes==0)
 end)
 local function rolled(degrees)
@@ -301,7 +305,7 @@ test("运行中换车、死亡、暂停、着地、失去控制权立即停止",
         function(w) w.veh=21 end,function(w) w.ptrs[20]=9999 end,
         function(w) w.driver=11 end,function(w) w.dead[10]=true end,
         function(w) w.paused=true end,function(w) w.faded=true end,
-        function(w) w.air=false end,function(w) w.height=1 end,
+        function(w) w.air=false; w.height=0 end,function(w) w.height=1 end,
         function(w) w.control=false end,
     }) do
         local w,e,click,step=harness(true)
@@ -335,5 +339,35 @@ test("运行中出参或输入异常停止辅助并释放缓冲",function()
         assert(w.writes==writes and w.frees==1 and msg():find("操作失败"))
         step(); assert(w.writes==writes)
     end
+end)
+test("Mk2 悬浮空中标志为 false 仍可进入并保持平衡",function()
+    local w,e,click,step=harness(true); w.air=false; w.height=30
+    click(ENTER); step(); assert(w.writes==1)
+    step(); w.q=rolled(30); step(); assert(w.writes==2 and w.frees==0)
+    e.on_stop()
+end)
+test("不依赖空中标志接口，自动准备仍以实际高度触发",function()
+    local w,e,click,step=harness(true)
+    e.ENTITY.IS_ENTITY_IN_AIR=nil
+    w.height=0; click(ARM); step(); assert(w.writes==0)
+    w.height=8; step(100); assert(w.writes==1)
+    step(); w.q=rolled(30); step(); assert(w.writes==2); e.on_stop()
+end)
+test("低高度提示包含实际读数",function()
+    local w,e,click,step,msg=harness(); w.height=0.25
+    click(ENTER); step(); assert(w.writes==0 and msg():find("0.25"))
+end)
+test("手动兼容可绕过失真的零高度并保持平衡",function()
+    local w,e,click,step=harness(true); w.height=0; w.air=false
+    w.checks["手动高度兼容（确认在空中时使用）"]=true
+    click(ENTER); step(); assert(w.writes==1)
+    step(); w.q=rolled(30); step(); assert(w.writes==2)
+    click("停止平衡辅助"); step(); assert(w.frees==1)
+end)
+test("兼容开关不会使地面自动准备立即触发",function()
+    local w,e,click,step=harness(true); w.height=0
+    w.checks["手动高度兼容（确认在空中时使用）"]=true
+    click(ARM); step(); step(100); assert(w.writes==0)
+    w.height=7; step(100); assert(w.writes==1); e.on_stop()
 end)
 print(string.format("%d tests passed",n))
